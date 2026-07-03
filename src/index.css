@@ -1,0 +1,31 @@
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #030810;
+  color: #9ab8d8;
+}
+
+body {
+  font-family: 'Courier New', monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Cesium overrides */
+.cesium-widget-credits { display: none !important; }
+.cesium-viewer-bottom   { display: none !important; }
+
+/* Scrollbar */
+::-webkit-scrollbar       { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #0d2040; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #1a3a60; }
+
+/* Selection */
+::selection { background: rgba(0,229,255,0.2); color: #fff; }
