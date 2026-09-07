@@ -1,0 +1,8 @@
+/privacy    /index.html  200
+/terms      /index.html  200
+/pricing    /index.html  200
+/app        /index.html  200
+/app/*      /index.html  200
+/dashboard  /index.html  200
+/dashboard/* /index.html 200
+/*          /index.html  200
