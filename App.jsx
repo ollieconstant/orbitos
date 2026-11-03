@@ -10,10 +10,17 @@ import { useAuth } from './useAuth.js'
 import { Logo } from './site.jsx'
 import { C, SANS, MONO, CAT, catOf } from './theme.js'
 
+// Parsing a TLE is the slow part, so do it once per satellite and reuse it
+const SATRECS = new Map()
 function propagate(sat, now) {
   try {
     if (!window.satellite || !sat.tle1 || !sat.tle2) return null
-    const satrec = window.satellite.twoline2satrec(sat.tle1, sat.tle2)
+    let satrec = SATRECS.get(sat.id)
+    if (!satrec || satrec._tle !== sat.tle1) {
+      satrec = window.satellite.twoline2satrec(sat.tle1, sat.tle2)
+      satrec._tle = sat.tle1
+      SATRECS.set(sat.id, satrec)
+    }
     const date   = new Date(now)
     const pv     = window.satellite.propagate(satrec, date)
     if (!pv || !pv.position) return null

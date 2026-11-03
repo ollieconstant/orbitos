@@ -38,7 +38,9 @@ function addWireframe(viewer, Cesium) {
 export default function Globe({ satellites=[], selected, onSelectSat, onViewerReady, orbitPaths={} }) {
   const containerRef = useRef(null)
   const viewerRef    = useRef(null)
-  const entitiesRef  = useRef({})
+  const pointsRef    = useRef(null)
+  const labelsRef    = useRef(null)
+  const byIdRef      = useRef(new Map())
   const orbitRef     = useRef({})
 
   useEffect(() => {
@@ -82,7 +84,7 @@ export default function Globe({ satellites=[], selected, onSelectSat, onViewerRe
 
         viewer.screenSpaceEventHandler.setInputAction((click) => {
           const picked = viewer.scene.pick(click.position)
-          if (Cesium.defined(picked) && picked.id?.satelliteData) onSelectSat?.(picked.id.satelliteData)
+          if (Cesium.defined(picked) && picked.id && picked.id.tle1 !== undefined) onSelectSat?.(picked.id)
           else onSelectSat?.(null)
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
@@ -118,43 +120,56 @@ export default function Globe({ satellites=[], selected, onSelectSat, onViewerRe
     tryInit()
     return () => {
       try { if (viewerRef.current && !viewerRef.current.isDestroyed()) viewerRef.current.destroy() } catch {}
-      viewerRef.current = null
+      viewerRef.current = null; pointsRef.current = null; labelsRef.current = null; byIdRef.current = new Map()
     }
   }, [])
 
+  // Satellites are drawn as GPU point primitives (much faster than entities for 15,000+ objects)
   useEffect(() => {
     const viewer = viewerRef.current, Cesium = window.Cesium
     if (!viewer || !Cesium || viewer.isDestroyed()) return
-    const currentIds = new Set()
+    if (!pointsRef.current) {
+      pointsRef.current = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection())
+      labelsRef.current = viewer.scene.primitives.add(new Cesium.LabelCollection())
+    }
+    const pts = pointsRef.current, labels = labelsRef.current, byId = byIdRef.current
+    const colors = {}
+    const colorOf = css => colors[css] || (colors[css] = Cesium.Color.fromCssColorString(css))
+    const outline = Cesium.Color.BLACK.withAlpha(0.6), selOutline = colorOf(C.live)
+    const near = new Cesium.NearFarScalar(1e6, 1.4, 5e7, 0.6)
+    const seen = new Set()
+    labels.removeAll()
+
     for (const sat of satellites) {
-      if (!sat.position) continue
-      const { lat, lon, alt } = sat.position
-      if (lat==null||lon==null||alt==null) continue
-      currentIds.add(String(sat.id))
-      const isSel = selected?.id===sat.id
-      const col   = Cesium.Color.fromCssColorString(sat.risk ? C.sig : isSel ? '#ffffff' : catOf(sat.cat).color)
-      const pos   = Cesium.Cartesian3.fromDegrees(lon,lat,alt*1000)
-      const sz    = isSel?11:sat.risk?8:sat.cat==='stations'?8:4
-      if (entitiesRef.current[sat.id]) {
-        const e = entitiesRef.current[sat.id]
-        e.position=new Cesium.ConstantPositionProperty(pos); e.satelliteData=sat
-        e.point.pixelSize=new Cesium.ConstantProperty(sz); e.point.color=new Cesium.ConstantProperty(col)
-        e.label.show=new Cesium.ConstantProperty(isSel||sat.cat==='stations')
-        e.point.outlineColor=new Cesium.ConstantProperty(isSel?Cesium.Color.fromCssColorString(C.live):Cesium.Color.BLACK.withAlpha(0.6))
-        e.point.outlineWidth=new Cesium.ConstantProperty(isSel?3:1)
+      const p = sat.position
+      if (!p || p.lat == null || p.lon == null || p.alt == null) continue
+      seen.add(sat.id)
+      const isSel = selected?.id === sat.id
+      const position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt * 1000)
+      const color = colorOf(sat.risk ? C.sig : isSel ? '#ffffff' : catOf(sat.cat).color)
+      const size = isSel ? 11 : sat.risk ? 8 : sat.cat === 'stations' ? 8 : 3.5
+      let pt = byId.get(sat.id)
+      if (!pt) {
+        pt = pts.add({ position, color, pixelSize: size, outlineColor: outline, outlineWidth: 1, scaleByDistance: near })
+        byId.set(sat.id, pt)
       } else {
-        try {
-          entitiesRef.current[sat.id] = viewer.entities.add({
-            id:String(sat.id), name:sat.name, satelliteData:sat, position:pos,
-            point:{ pixelSize:sz, color:col, outlineColor:isSel?Cesium.Color.fromCssColorString(C.live):Cesium.Color.BLACK.withAlpha(0.6), outlineWidth:isSel?3:1, disableDepthTestDistance:Number.POSITIVE_INFINITY, scaleByDistance:new Cesium.NearFarScalar(1e3,1.5,5e7,0.5) },
-            label:{ text:sat.name.toUpperCase(), show:sat.cat==='stations'||isSel, font:LABEL_FONT, fillColor:Cesium.Color.fromCssColorString(C.fg), outlineColor:Cesium.Color.fromCssColorString(C.bg), outlineWidth:3, style:Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin:Cesium.VerticalOrigin.BOTTOM, pixelOffset:new Cesium.Cartesian2(0,-14), distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,6000000), disableDepthTestDistance:Number.POSITIVE_INFINITY },
-          })
-        } catch {}
+        pt.position = position; pt.color = color; pt.pixelSize = size
+      }
+      pt.outlineColor = isSel ? selOutline : outline
+      pt.outlineWidth = isSel ? 3 : 1
+      pt.id = sat // used for picking
+
+      if (isSel || sat.cat === 'stations' || sat.risk) {
+        labels.add({
+          position, text: sat.name.toUpperCase(), font: LABEL_FONT,
+          fillColor: colorOf(isSel ? C.live : sat.risk ? C.sig : C.fg), outlineColor: colorOf(C.bg), outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -14),
+          distanceDisplayCondition: isSel ? undefined : new Cesium.DistanceDisplayCondition(0, 2.5e7),
+        })
       }
     }
-    for (const id of Object.keys(entitiesRef.current)) {
-      if (!currentIds.has(id)) { try { viewer.entities.removeById(id) } catch {}; delete entitiesRef.current[id] }
-    }
+    for (const [id, pt] of byId) if (!seen.has(id)) { pts.remove(pt); byId.delete(id) }
   }, [satellites, selected])
 
   useEffect(() => {

@@ -1,11 +1,11 @@
-// OrbitOS API worker — generated from the original functions/ folder. Edit the handler sections below.
+// OrbitOS API worker — all /api/* endpoints in one file (Cloudflare Pages advanced mode).
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/_middleware.js
+// functions/api/_middleware.js
 async function onRequest({ request, next, env }) {
   const url = new URL(request.url);
   const origin = request.headers.get("Origin") || "";
@@ -47,7 +47,7 @@ async function onRequest({ request, next, env }) {
   });
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/tle.js
+// functions/api/tle.js
 var tle_exports = {};
 __export(tle_exports, {
   onRequestGet: () => onRequestGet,
@@ -125,34 +125,45 @@ async function onRequestOptions() {
   });
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/satellites.js
+// functions/api/satellites.js
 var satellites_exports = {};
 __export(satellites_exports, {
   onRequestGet: () => onRequestGet2
 });
+var PAGE = 1e3;
+var MAX_PAGES = 40;
 async function onRequestGet2({ request, env }) {
-  const url = new URL(request.url), limit = Math.min(parseInt(url.searchParams.get("limit") || "5000"), 5e4), format = url.searchParams.get("format") || "json", category = url.searchParams.get("category");
-  const headers = { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300, stale-while-revalidate=600" };
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return new Response(JSON.stringify({ error: "Supabase not configured", satellites: [] }), { status: 503, headers: { ...headers, "Content-Type": "application/json" } });
+  const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+    return new Response(JSON.stringify({ error: "Supabase not configured", rows: [] }), { status: 503, headers });
+  }
+  const auth = { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` };
+  const base = `${env.SUPABASE_URL}/rest/v1/tle_records?is_current=eq.true&select=norad_id,name,tle1,tle2,satellites(category)&order=norad_id.asc&limit=${PAGE}`;
   try {
-    let q = `${env.SUPABASE_URL}/rest/v1/tle_records?is_current=eq.true&select=norad_id,name,tle1,tle2,epoch,satellites!inner(category,country)&limit=${limit}&order=ingested_at.desc`;
-    if (category) q += `&satellites.category=eq.${category}`;
-    const res = await fetch(q, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, "Content-Type": "application/json" } });
-    if (!res.ok) throw new Error("Supabase " + res.status);
-    const data = await res.json();
-    if (!data?.length) return new Response(JSON.stringify({ error: "No data yet. Run /api/ingest first.", count: 0, satellites: [] }), { status: 404, headers: { ...headers, "Content-Type": "application/json" } });
-    if (format === "tle") {
-      const text = data.map((r) => r.name.padEnd(24).slice(0, 24) + "\n" + r.tle1 + "\n" + r.tle2).join("\n");
-      return new Response(text, { headers: { ...headers, "Content-Type": "text/plain" } });
+    const parts = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const res = await fetch(`${base}&offset=${page * PAGE}`, { headers: auth });
+      if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 160)}`);
+      const text = (await res.text()).trim();
+      const inner = text.slice(1, -1).trim();
+      if (!inner) break;
+      parts.push(inner);
+      let n = 0, at = -1;
+      while ((at = inner.indexOf('"norad_id"', at + 1)) !== -1) n++;
+      if (n < PAGE) break;
     }
-    const satellites = data.map((r) => ({ id: r.norad_id, name: r.name, category: r.satellites?.category || "unknown", country: r.satellites?.country, tle1: r.tle1, tle2: r.tle2, epoch: r.epoch }));
-    return new Response(JSON.stringify({ count: satellites.length, satellites }), { headers: { ...headers, "Content-Type": "application/json" } });
+    if (!parts.length) {
+      return new Response(JSON.stringify({ error: "No data yet. Run /api/ingest first.", rows: [] }), { status: 404, headers });
+    }
+    return new Response(`{"rows":[${parts.join(",")}]}`, {
+      headers: { ...headers, "Cache-Control": "public, max-age=300, stale-while-revalidate=600" }
+    });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message, satellites: [] }), { status: 500, headers: { ...headers, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: err.message, rows: [] }), { status: 500, headers });
   }
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/ingest.js
+// functions/api/ingest.js
 var ingest_exports = {};
 __export(ingest_exports, {
   onRequestGet: () => onRequestGet3
@@ -268,14 +279,16 @@ async function storeTLEs(tles, runAt, env) {
   let n = 0;
   for (let i = 0; i < tles.length; i += BATCH) {
     const batch = tles.slice(i, i + BATCH);
-    await sb(
+    const saved = await sb(
       env,
-      "satellites?on_conflict=norad_id",
+      "satellites?on_conflict=norad_id&select=id,norad_id",
       "POST",
       batch.map((t) => ({ norad_id: t.noradId, name: t.name, category: t.category, is_active: true, updated_at: runAt })),
-      "resolution=merge-duplicates,return=minimal"
+      "resolution=merge-duplicates,return=representation"
     );
+    const idOf = new Map((saved || []).map((r) => [r.norad_id, r.id]));
     const rows = batch.map((t) => ({
+      satellite_id: idOf.get(t.noradId) ?? null,
       norad_id: t.noradId,
       name: t.name,
       tle1: t.tle1,
@@ -286,7 +299,7 @@ async function storeTLEs(tles, runAt, env) {
       ingested_at: runAt
     }));
     await sb(env, "tle_records", "POST", rows);
-    await sb(env, "tle_history", "POST", rows.map(({ is_current, ...r }) => r));
+    await sb(env, "tle_history", "POST", rows.map(({ is_current, satellite_id, ...r }) => r));
     n += batch.length;
   }
   return n;
@@ -303,9 +316,10 @@ async function sb(env, path, method, body, prefer = "return=minimal") {
     body: JSON.stringify(body)
   });
   if (!res.ok) throw new Error(`${method} ${path.split("?")[0]} \u2192 ${res.status} ${(await res.text()).slice(0, 160)}`);
+  return prefer.includes("return=representation") ? res.json() : null;
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/contact.js
+// functions/api/contact.js
 var contact_exports = {};
 __export(contact_exports, {
   onRequestOptions: () => onRequestOptions2,
@@ -323,7 +337,7 @@ async function onRequestOptions2() {
   return new Response(null, { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" } });
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/send-alert.js
+// functions/api/send-alert.js
 var send_alert_exports = {};
 __export(send_alert_exports, {
   onRequestOptions: () => onRequestOptions3,
@@ -342,7 +356,7 @@ async function onRequestOptions3() {
   return new Response(null, { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" } });
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/stripe-checkout.js
+// functions/api/stripe-checkout.js
 var stripe_checkout_exports = {};
 __export(stripe_checkout_exports, {
   onRequestOptions: () => onRequestOptions4,
@@ -364,7 +378,7 @@ async function onRequestOptions4() {
   return new Response(null, { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" } });
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/stripe-webhook.js
+// functions/api/stripe-webhook.js
 var stripe_webhook_exports = {};
 __export(stripe_webhook_exports, {
   onRequestPost: () => onRequestPost4
@@ -458,7 +472,7 @@ async function onRequestPost4({ request, env }) {
   });
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/functions/api/v1/satellites.js
+// functions/api/v1/satellites.js
 var satellites_exports2 = {};
 __export(satellites_exports2, {
   onRequestGet: () => onRequestGet4,
@@ -540,7 +554,7 @@ async function onRequestOptions5() {
   });
 }
 
-// ../../tmp/claude-0/-home-claude/5a67f6ef-5151-5147-a873-1db616c6a0ed/scratchpad/wk/router.js
+// router.js
 var ROUTES = {
   "/api/tle": tle_exports,
   "/api/satellites": satellites_exports,

@@ -1,4 +1,4 @@
-const CACHE_KEY = 'orbitos_tle_v8'
+const CACHE_KEY = 'orbitos_tle_v9'
 const CACHE_TTL = 6 * 60 * 60 * 1000
 
 const GROUPS = [
@@ -45,7 +45,7 @@ function loadCache() {
 }
 
 function saveCache(satellites) {
-  try { localStorage.setItem(CACHE_KEY,JSON.stringify({timestamp:Date.now(),satellites,version:8})) } catch {}
+  try { localStorage.setItem(CACHE_KEY,JSON.stringify({timestamp:Date.now(),satellites,version:9})) } catch {}
 }
 
 export async function fetchAllTLEs({ onProgress=()=>{}, forceRefresh=false }={}) {
@@ -58,12 +58,14 @@ export async function fetchAllTLEs({ onProgress=()=>{}, forceRefresh=false }={})
   // Try own database first
   onProgress({group:'database',status:'fetching'})
   try {
-    const res=await fetch('/api/satellites?limit=10000&format=json')
+    const res=await fetch('/api/satellites')
     if (res.ok) {
       const json=await res.json()
-      if (json.satellites?.length>10) {
-        json.satellites.forEach(sat => {
-          if (!seenIds.has(sat.id)) { seenIds.add(sat.id); allSats.push({id:sat.id,name:sat.name,cat:sat.category||'unknown',color:GROUPS.find(g=>g.key===sat.category)?.color||'#94a3b8',tle1:sat.tle1,tle2:sat.tle2}) }
+      // New format: { rows:[{norad_id,name,tle1,tle2,satellites:{category}}] }; old format kept as a fallback
+      const list=json.rows ? json.rows.map(r=>({id:r.norad_id,name:r.name,category:r.satellites?.category,tle1:r.tle1,tle2:r.tle2})) : (json.satellites||[])
+      if (list.length>10) {
+        list.forEach(sat => {
+          if (!seenIds.has(sat.id)) { seenIds.add(sat.id); allSats.push({id:sat.id,name:sat.name,cat:sat.category||'unknown',tle1:sat.tle1,tle2:sat.tle2}) }
         })
         console.log('[TLE] Database:',allSats.length)
         onProgress({group:'database',status:'done',count:allSats.length})
