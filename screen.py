@@ -14,6 +14,7 @@ are screening results (who to look at), not precise collision probabilities.
 """
 
 import json
+import re
 import os
 import sys
 import time
@@ -30,6 +31,10 @@ def _clean_url(u):
     u = u.strip().strip('"').strip("'").strip().rstrip("/")
     if u.endswith("/rest/v1"):
         u = u[: -len("/rest/v1")]
+    # A dashboard link (supabase.com/dashboard/project/<ref>) instead of the API URL
+    m = re.search(r"supabase\.com/dashboard/project/([a-z0-9]+)", u)
+    if m:
+        u = f"https://{m.group(1)}.supabase.co"
     if u and not u.startswith(("http://", "https://")):
         u = "https://" + u
     return u
@@ -54,14 +59,27 @@ SEARCH_R = THRESHOLD_KM + V_REL_MAX * STEP_S / 2  # anything that could get with
 # ── Supabase REST helpers ─────────────────────────────────────────────────────
 
 def sb(path, method="GET", body=None, prefer=None):
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
+    headers = {"apikey": SUPABASE_KEY, "Content-Type": "application/json"}
+    if SUPABASE_KEY.startswith("eyJ"):  # legacy JWT keys also go in Authorization; new sb_ keys only in apikey
+        headers["Authorization"] = f"Bearer {SUPABASE_KEY}"
     if prefer:
         headers["Prefer"] = prefer
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(f"{SUPABASE_URL}/rest/v1/{path}", data=data, method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=60) as res:
         raw = res.read()
-        return json.loads(raw) if raw and method == "GET" else None
+        if not raw or method != "GET":
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            host = urllib.parse.urlparse(SUPABASE_URL).hostname or "?"
+            sys.exit(
+                "Supabase didn't return JSON, so SUPABASE_URL is probably not your project's API URL.\n"
+                f"  It points at a host ending in: ...{host[-12:]}\n"
+                "  It should look like https://<project-ref>.supabase.co (Supabase > Project Settings > API > Project URL).\n"
+                f"  Response started with: {raw[:80]!r}"
+            )
 
 
 def load_catalogue():
@@ -161,6 +179,9 @@ def screen(sats, meta, start):
 def main():
     if not SUPABASE_URL or not SUPABASE_KEY:
         sys.exit("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
+    if SUPABASE_KEY.startswith("sb_publishable_"):
+        sys.exit("SUPABASE_SERVICE_KEY is the publishable key. Use the secret key instead "
+                 "(Supabase > Settings > API Keys > Secret keys, starts with sb_secret_).")
     t0 = time.time()
     start = datetime.now(timezone.utc).replace(microsecond=0)
 
