@@ -156,7 +156,7 @@ export default function Pricing() {
           </div>
 
           <div className="op-band">
-            {[['Active satellites tracked', '15,000+'], ['Screening cycle', '5 s'], ['Default alert threshold', '< 5 km'], ['Enterprise uptime SLA', '99.9%']].map(([l, v], i) => (
+            {[['Active satellites tracked', '15,000+'], ['Look-ahead window', '24 h'], ['Default alert threshold', '< 5 km'], ['Enterprise uptime SLA', '99.9%']].map(([l, v], i) => (
               <div key={l} className={'ox-r ox-d' + i}><div className="ox-mono ox-dim">{l}</div><div className="v">{v}</div></div>
             ))}
           </div>

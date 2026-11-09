@@ -4,9 +4,10 @@ import { CAT, catOf } from './theme.js'
 
 const LIMIT = 150
 
-export default function Sidebar({ satellites = [], risks = [], selected, onSelect, isPro = false, hidden = new Set(), onToggleCat, open = false }) {
+export default function Sidebar({ satellites = [], risks = [], fmtTca = x => x, selected, onSelect, isPro = false, hidden = new Set(), onToggleCat, open = false }) {
   const [query, setQuery] = useState('')
-  const riskNames = useMemo(() => new Set(risks.flatMap(r => [r.sat1, r.sat2])), [risks])
+  const riskIds = useMemo(() => new Set(risks.flatMap(r => [r.id1, r.id2])), [risks])
+  const byId = useMemo(() => new Map(satellites.map(s => [s.id, s])), [satellites])
 
   const counts = useMemo(() => {
     const c = {}
@@ -23,9 +24,9 @@ export default function Sidebar({ satellites = [], risks = [], selected, onSelec
 
   // Conjunction objects first, then the rest
   const ordered = useMemo(() => {
-    if (!riskNames.size) return filtered
-    return [...filtered].sort((a, b) => (riskNames.has(b.name) ? 1 : 0) - (riskNames.has(a.name) ? 1 : 0))
-  }, [filtered, riskNames])
+    if (!riskIds.size) return filtered
+    return [...filtered].sort((a, b) => (riskIds.has(b.id) ? 1 : 0) - (riskIds.has(a.id) ? 1 : 0))
+  }, [filtered, riskIds])
 
   const cats = Object.keys(CAT).filter(k => counts[k])
 
@@ -55,7 +56,7 @@ export default function Sidebar({ satellites = [], risks = [], selected, onSelec
       <div className="oa-list">
         {ordered.length === 0 && <div className="oa-more oa-mono oa-dim">No objects match</div>}
         {ordered.slice(0, LIMIT).map(sat => {
-          const isRisk = riskNames.has(sat.name), isSel = selected?.id === sat.id
+          const isRisk = riskIds.has(sat.id), isSel = selected?.id === sat.id
           const alt = sat.position?.alt
           return (
             <div key={sat.id} className={'oa-row' + (isSel ? ' sel' : isRisk ? ' risk' : '')} onClick={() => onSelect(isSel ? null : sat)}>
@@ -74,10 +75,10 @@ export default function Sidebar({ satellites = [], risks = [], selected, onSelec
       {risks.length > 0 && (
         <div className="oa-conj">
           <div className="oa-conj-hd oa-mono"><span>Conjunctions</span><span>{risks.length}</span></div>
-          {risks.slice(0, 6).map((r, i) => (
-            <div key={i} className="oa-conj-row">
+          {risks.slice(0, 50).map((r, i) => (
+            <div key={i} className="oa-conj-row" style={{ cursor: byId.has(r.id1) ? 'pointer' : 'default' }} onClick={() => byId.has(r.id1) && onSelect(byId.get(r.id1))}>
               <div className="nm">{r.sat1} <span style={{ color: '#5d6168' }}>×</span> {r.sat2}</div>
-              <div className="sub oa-mono" style={{ color: r.severity === 'CRITICAL' ? '#ff5a1f' : '#9a9ea5' }}>{r.distanceKm} km · {r.severity}</div>
+              <div className="sub oa-mono" style={{ color: r.severity === 'CRITICAL' ? '#ff5a1f' : '#9a9ea5' }}>{r.distanceKm} km · {fmtTca(r.tca)}</div>
             </div>
           ))}
         </div>

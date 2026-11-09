@@ -222,7 +222,7 @@ const Glyph = {
 
 const CAPS = [
   { k: 'globe', tag: 'Tracking', t: 'A live operating picture of orbit', d: 'Every active satellite in Earth orbit, propagated and rendered in real time. Select any object to see its orbit and state.' },
-  { k: 'conj', tag: 'Screening', t: 'Collision risk, before it becomes a headline', d: 'Object pairs are screened for close approaches every five seconds. Anything that crosses your threshold is flagged and escalated.' },
+  { k: 'conj', tag: 'Screening', t: 'Collision risk, before it becomes a headline', d: 'Every pair of satellites is screened for close approaches over the next 24 hours, four times a day. Anything that crosses your threshold is flagged and escalated.' },
   { k: 'prop', tag: 'Propagation', t: 'SGP4 at the core', d: 'The standard model behind public space-surveillance catalogues, running against fresh element sets for every object.' },
   { k: 'alert', tag: 'Alerting', t: 'Warnings that reach the right people', d: 'Email, push and webhook delivery, so a warning lands in the systems your team already watches.' },
   { k: 'data', tag: 'Catalogue', t: 'Our own orbital database', d: 'Element sets ingested every six hours from public space-surveillance sources into the OrbitOS catalogue.' },
@@ -232,7 +232,7 @@ const CAPS = [
 const STAGES = [
   { n: '01', t: 'Ingest', d: 'Fresh element sets pulled into the OrbitOS catalogue.', s: 'Every 6 h' },
   { n: '02', t: 'Propagate', d: 'SGP4 computes a current state vector for every object.', s: 'Continuous' },
-  { n: '03', t: 'Screen', d: 'Object pairs checked for close approaches against your thresholds.', s: 'Every 5 s' },
+  { n: '03', t: 'Screen', d: 'Every pair checked for close approaches over the next 24 hours.', s: 'Every 6 h' },
   { n: '04', t: 'Alert', d: 'Warnings delivered by email, push or webhook.', s: 'Seconds' },
 ]
 
@@ -259,7 +259,7 @@ export default function Landing() {
         <div className="ox-hero-fade" />
         <div className="ox-wrap ox-hero-in">
           <h1 className="ox-h1 ox-r ox-d1">Command the<br />orbital <em>domain.</em></h1>
-          <p className="ox-lede ox-r ox-d2">OrbitOS tracks every active satellite in Earth orbit, screens for collisions continuously, and alerts operators before a close approach becomes a debris field.</p>
+          <p className="ox-lede ox-r ox-d2">OrbitOS tracks every active satellite in Earth orbit, screens every pair for close approaches, and alerts operators before a close approach becomes a debris field.</p>
           <div className="ox-ctas ox-r ox-d3">
             <a href="/app" className="ox-btn pri">Launch platform <Arrow /></a>
             <a href="mailto:hello@orbitos.space?subject=OrbitOS%20briefing" className="ox-btn sec">Request a briefing</a>
@@ -278,7 +278,7 @@ export default function Landing() {
           </div>
           <div className="ox-band">
             <div className="ox-r"><div className="ox-mono ox-dim">Active satellites tracked</div><div className="ox-big">15,000+</div><p className="ox-p" style={{ fontSize: 15 }}>Every active satellite in one live picture, refreshed every six hours.</p></div>
-            <div className="ox-r ox-d1"><div className="ox-mono ox-dim">Screening cycle</div><div className="ox-big">5 s</div><p className="ox-p" style={{ fontSize: 15 }}>Close-approach checks run continuously, not once a day.</p></div>
+            <div className="ox-r ox-d1"><div className="ox-mono ox-dim">Look-ahead window</div><div className="ox-big">24 h</div><p className="ox-p" style={{ fontSize: 15 }}>Every pair screened for the day ahead, four times a day.</p></div>
             <div className="ox-r ox-d2"><div className="ox-mono ox-dim">Closing speed, 2009 collision</div><div className="ox-big sig">11.7 km/s</div><p className="ox-p" style={{ fontSize: 15 }}>There's no time to react once it's close. Prediction is the only defence.</p></div>
           </div>
         </div>

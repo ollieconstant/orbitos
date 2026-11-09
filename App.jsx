@@ -35,6 +35,11 @@ function propagate(sat, now) {
 }
 
 const regime = alt => alt == null ? '—' : alt < 2000 ? 'LEO' : Math.abs(alt - 35786) < 600 ? 'GEO' : alt < 35286 ? 'MEO' : 'HEO'
+const fmtTca = iso => {
+  const t = new Date(iso), mins = Math.round((t - Date.now()) / 60000)
+  const rel = mins <= 0 ? 'now' : mins < 60 ? `in ${mins} min` : `in ${Math.floor(mins / 60)} h ${mins % 60} min`
+  return `${t.toISOString().slice(11, 16)} UTC · ${rel}`
+}
 const fmtLat = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? 'N' : 'S'}`
 const fmtLon = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? 'E' : 'W'}`
 
@@ -157,6 +162,7 @@ export default function App() {
   const [positions,  setPositions]  = useState({})
   const [selected,   setSelected]   = useState(null)
   const [risks,      setRisks]      = useState([])
+  const [screened,   setScreened]   = useState(false)
   const [loading,    setLoading]    = useState(true)
   const [loadMsg,    setLoadMsg]    = useState('Connecting to catalogue')
   const [showAuth,   setShowAuth]   = useState(false)
@@ -183,34 +189,42 @@ export default function App() {
     const run = () => {
       const now  = Date.now()
       const pos  = {}
-      const found = []
       satellites.forEach(s => { const p = propagate(s, now); if (p) pos[s.id] = p })
-      const list = satellites.filter(s => pos[s.id]).slice(0, 150)
-      for (let i = 0; i < list.length; i++) {
-        for (let j = i + 1; j < list.length; j++) {
-          const a = pos[list[i].id], b = pos[list[j].id]
-          const dx = (a.lon - b.lon) * 111 * Math.cos(a.lat * Math.PI / 180)
-          const dy = (a.lat - b.lat) * 111
-          const dz = a.alt - b.alt
-          const d  = Math.sqrt(dx*dx + dy*dy + dz*dz)
-          if (d < 10) found.push({ sat1: list[i].name, sat2: list[j].name, distanceKm: d.toFixed(1), severity: d < 5 ? 'CRITICAL' : 'WARNING' })
-        }
-      }
       setPositions(pos)
-      setRisks(found.slice(0, 10))
     }
     run()
     const iv = setInterval(run, 5000)
     return () => clearInterval(iv)
   }, [satReady, satellites])
 
+  // Close approaches come from the server-side screening run (screen.py), refreshed every 5 minutes
+  useEffect(() => {
+    let alive = true
+    const load = () => fetch('/api/conjunctions')
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(j => {
+        if (!alive) return
+        setRisks((j.conjunctions || []).map(c => ({
+          id1: c.sat1_norad_id, id2: c.sat2_norad_id, sat1: c.sat1_name, sat2: c.sat2_name,
+          distanceKm: Number(c.distance_km).toFixed(2), severity: c.severity, tca: c.tca_estimate,
+        })))
+        setScreened(true)
+      })
+      .catch(() => {})
+    load()
+    const iv = setInterval(load, 5 * 60 * 1000)
+    return () => { alive = false; clearInterval(iv) }
+  }, [])
+
+  const riskIds = useMemo(() => new Set(risks.flatMap(r => [r.id1, r.id2])), [risks])
+
   const sats = useMemo(() => satellites.map(s => ({
     ...s,
     cat:      CAT[s.cat] ? s.cat : 'unknown',
     position: positions[s.id] || null,
-    risk:     risks.some(r => r.sat1 === s.name || r.sat2 === s.name),
+    risk:     riskIds.has(s.id),
     color:    catOf(s.cat).color,
-  })), [satellites, positions, risks])
+  })), [satellites, positions, riskIds])
 
   const shown = useMemo(() => hidden.size ? sats.filter(s => !hidden.has(s.cat)) : sats, [sats, hidden])
 
@@ -250,7 +264,7 @@ export default function App() {
       {/* Body */}
       <div className="oa-body">
         {listOpen && <div className="oa-scrim" onClick={() => setListOpen(false)} />}
-        <Sidebar satellites={sats} risks={risks} selected={sel} onSelect={pick} isPro={isPro} hidden={hidden} onToggleCat={toggleCat} open={listOpen} />
+        <Sidebar satellites={sats} risks={risks} fmtTca={fmtTca} selected={sel} onSelect={pick} isPro={isPro} hidden={hidden} onToggleCat={toggleCat} open={listOpen} />
 
         <main className="oa-view">
           {loading ? (
@@ -281,11 +295,29 @@ export default function App() {
                     <div className="oa-cell" key={l}><div className="oa-mono oa-dim">{l}</div><div className="v">{v}</div></div>
                   ))}
                   <div className="oa-cell full">
-                    <div className="oa-mono oa-dim">Status</div>
-                    <div className="oa-status" style={{ color: sel.risk ? C.sig : C.live }}>
-                      <i style={{ width: 6, height: 6, background: sel.risk ? C.sig : C.live, display: 'block' }} />
-                      {sel.risk ? 'CONJUNCTION RISK' : 'CLEAR'}
-                    </div>
+                    <div className="oa-mono oa-dim">Next 24 h</div>
+                    {(() => {
+                      const mine = risks.filter(r => r.id1 === sel.id || r.id2 === sel.id).sort((a, b) => a.distanceKm - b.distanceKm)
+                      if (!mine.length) return (
+                        <div className="oa-status" style={{ color: screened ? C.live : C.dim }}>
+                          <i style={{ width: 6, height: 6, background: screened ? C.live : C.dim, display: 'block' }} />
+                          {screened ? 'NO APPROACHES UNDER 5 KM' : 'NOT YET SCREENED'}
+                        </div>
+                      )
+                      const c = mine[0], other = c.id1 === sel.id ? c.sat2 : c.sat1
+                      return (
+                        <>
+                          <div className="oa-status" style={{ color: C.sig }}>
+                            <i style={{ width: 6, height: 6, background: C.sig, display: 'block' }} />
+                            {mine.length} APPROACH{mine.length > 1 ? 'ES' : ''} UNDER 5 KM
+                          </div>
+                          <div style={{ fontSize: 14, lineHeight: 1.5, marginTop: 10 }}>
+                            Closest: <b style={{ fontWeight: 500 }}>{c.distanceKm} km</b> from {other}<br />
+                            <span className="oa-mono oa-dim">{fmtTca(c.tca)}</span>
+                          </div>
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               ) : (

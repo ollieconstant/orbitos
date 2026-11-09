@@ -221,7 +221,15 @@ async function onRequestGet3({ request, env }) {
   if (all.length) {
     try {
       stored = await storeTLEs(all, runAt, env);
-      await sb(env, `tle_records?is_current=eq.true&ingested_at=lt.${encodeURIComponent(runAt)}`, "PATCH", { is_current: false });
+      const older = `is_current=eq.true&ingested_at=lt.${encodeURIComponent(runAt)}`;
+      if (groups.active > 0) {
+        await sb(env, `tle_records?${older}`, "PATCH", { is_current: false });
+      } else {
+        const ids = all.map((t) => t.noradId);
+        for (let i = 0; i < ids.length; i += 500) {
+          await sb(env, `tle_records?${older}&norad_id=in.(${ids.slice(i, i + 500).join(",")})`, "PATCH", { is_current: false });
+        }
+      }
     } catch (err) {
       errors.push(`store: ${err.message}`);
     }
@@ -245,9 +253,9 @@ async function onRequestGet3({ request, env }) {
 }
 async function fetchGroup(group) {
   const res = await fetch(`${CELESTRAK}?GROUP=${encodeURIComponent(group)}&FORMAT=tle`, {
-    headers: { "User-Agent": "OrbitOS/1.0 (+https://orbitos-8n5.pages.dev; hello@orbitos.space)" }
+    headers: { "User-Agent": "OrbitOS/1.0 (+https://orbitos-8n5.pages.dev)" }
   });
-  if (!res.ok) throw new Error(`Celestrak HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`Celestrak HTTP ${res.status}: ${(await res.text()).replace(/\s+/g, " ").slice(0, 140).trim()}`);
   const text = await res.text();
   if (!text.includes("\n1 ")) throw new Error(`Celestrak: ${text.slice(0, 120).trim() || "empty response"}`);
   return parseTLE(text);
@@ -554,6 +562,30 @@ async function onRequestOptions5() {
   });
 }
 
+// functions/api/conjunctions.js
+var conjunctions_exports = {};
+__export(conjunctions_exports, {
+  onRequestGet: () => onRequestGet5
+});
+async function onRequestGet5({ request, env }) {
+  const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+    return new Response(JSON.stringify({ error: "Supabase not configured", conjunctions: [] }), { status: 503, headers });
+  }
+  const url = new URL(request.url);
+  const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "300", 10) || 300, 1), 1e3);
+  const maxKm = parseFloat(url.searchParams.get("max_km") || "5") || 5;
+  const q = `${env.SUPABASE_URL}/rest/v1/conjunctions?is_active=eq.true&distance_km=lte.${maxKm}&tca_estimate=gte.${encodeURIComponent(new Date(Date.now() - 15 * 6e4).toISOString())}&select=sat1_norad_id,sat1_name,sat2_norad_id,sat2_name,distance_km,severity,tca_estimate,detected_at&order=distance_km.asc&limit=${limit}`;
+  try {
+    const res = await fetch(q, { headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } });
+    if (!res.ok) throw new Error(`Supabase ${res.status}`);
+    const rows = await res.text();
+    return new Response(`{"conjunctions":${rows}}`, { headers: { ...headers, "Cache-Control": "public, max-age=120" } });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message, conjunctions: [] }), { status: 500, headers });
+  }
+}
+
 // router.js
 var ROUTES = {
   "/api/tle": tle_exports,
@@ -563,7 +595,8 @@ var ROUTES = {
   "/api/send-alert": send_alert_exports,
   "/api/stripe-checkout": stripe_checkout_exports,
   "/api/stripe-webhook": stripe_webhook_exports,
-  "/api/v1/satellites": satellites_exports2
+  "/api/v1/satellites": satellites_exports2,
+  "/api/conjunctions": conjunctions_exports
 };
 var METHOD_KEY = { GET: "onRequestGet", POST: "onRequestPost", OPTIONS: "onRequestOptions", PUT: "onRequestPut", DELETE: "onRequestDelete", PATCH: "onRequestPatch", HEAD: "onRequestHead" };
 var router_default = {
