@@ -25,8 +25,18 @@ import numpy as np
 from scipy.spatial import cKDTree
 from sgp4.api import Satrec, SatrecArray, jday
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+def _clean_url(u):
+    # Tolerate common paste mistakes: spaces/quotes, a missing https://, or a trailing /rest/v1
+    u = u.strip().strip('"').strip("'").strip().rstrip("/")
+    if u.endswith("/rest/v1"):
+        u = u[: -len("/rest/v1")]
+    if u and not u.startswith(("http://", "https://")):
+        u = "https://" + u
+    return u
+
+
+SUPABASE_URL = _clean_url(os.environ.get("SUPABASE_URL", ""))
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip().strip('"').strip("'").strip()
 
 HORIZON_HOURS = float(os.environ.get("HORIZON_HOURS", "24"))
 STEP_S = float(os.environ.get("STEP_S", "10"))
