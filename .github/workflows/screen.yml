@@ -1,0 +1,23 @@
+name: Conjunction screening
+
+on:
+  schedule:
+    - cron: '40 */6 * * *'   # every 6 hours, at :40 past (after the ingest has run)
+  workflow_dispatch:          # adds a "Run workflow" button in the Actions tab
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install "sgp4>=2.23" numpy scipy
+      - name: Screen for conjunctions
+        run: python screen.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
